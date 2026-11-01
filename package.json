@@ -1,18 +1,40 @@
 {
   "name": "cravings",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "App.js",
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-navigation/native": "^7.5.1",
+    "@react-navigation/stack": "^7.12.1",
+    "@tanstack/react-query": "^5.105.0",
+    "babel-preset-expo": "~58.0.0",
     "expo": "~58.0.20",
+    "expo-constants": "~58.0.13",
+    "expo-linking": "~58.0.14",
+    "expo-router": "~58.0.27",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",
-    "react-native": "0.88.0"
+    "react-hook-form": "^7.91.0",
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-native": "^0.72.8",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~58.0.4",
+    "typescript": "^7.0.2"
+  }
 }
