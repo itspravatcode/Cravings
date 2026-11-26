@@ -69,7 +69,9 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
     });
   } catch (e: unknown) {
     const aborted = e instanceof Error && e.name === 'AbortError';
-    throw new ApiError(0, 'NETWORK', aborted ? `Server didn't respond. Is the backend running at ${API_URL}?` : "Can't reach the server. Check your connection.");
+    throw new ApiError(0, 'NETWORK', aborted
+      ? 'The server is taking a while to respond. If it was asleep it can take up to 2 minutes to wake up. Please try again shortly.'
+      : "Can't reach the server. Check your connection.");
   } finally {
     clearTimeout(timeout);
   }
