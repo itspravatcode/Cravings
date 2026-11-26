@@ -1,72 +1,97 @@
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User, AuthResponse, LoginCredentials, RegisterCredentials } from '@/types';
-import { api } from '@/services/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { unregisterPush } from '@/lib/push';
+import { useSession } from '@/lib/session';
+import type { AuthResponse, Me, Page, Plan, Poll, PickupOffer, PickupRequest, ProfileStats } from '@/lib/types';
+import { queryClient } from './queryClient';
 
-interface AuthState {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  error: string | null;
-  login: (credentials: LoginCredentials) => Promise<void>;
-  register: (credentials: RegisterCredentials) => Promise<void>;
-  logout: () => Promise<void>;
-  setUser: (user: User) => void;
-  clearError: () => void;
+export type RegisterInput = { name: string; username: string; email: string; password: string; avatarUrl?: string };
+export type LoginInput = { identifier: string; password: string };
+export type ProfileInput = { name?: string; username?: string; avatarUrl?: string };
+
+async function startSession(res: AuthResponse) {
+  queryClient.clear();
+  await useSession.getState().signIn(res.accessToken, res.user);
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
-      isLoading: false,
-      error: null,
+export function useLogin() {
+  return useMutation({
+    mutationFn: (input: LoginInput) => api.post<AuthResponse>('/auth/login', input),
+    onSuccess: startSession,
+  });
+}
 
-      login: async (credentials) => {
-        set({ isLoading: true, error: null });
-        try {
-          const { token, user } = await api.login(credentials);
-          set({ user, token, isAuthenticated: true, isLoading: false, error: null });
-        } catch (err: any) {
-          set({ isLoading: false, error: err.message || 'Login failed' });
-          throw err;
-        }
-      },
+export function useRegister() {
+  return useMutation({
+    mutationFn: (input: RegisterInput) => api.post<AuthResponse>('/auth/register', input),
+    onSuccess: startSession,
+  });
+}
 
-      register: async (credentials) => {
-        set({ isLoading: true, error: null });
-        try {
-          const { token, user } = await api.register(credentials);
-          set({ user, token, isAuthenticated: true, isLoading: false, error: null });
-        } catch (err: any) {
-          set({ isLoading: false, error: err.message || 'Registration failed' });
-          throw err;
-        }
-      },
+export async function signOut() {
+  await unregisterPush(); // while we still have the token to authenticate the call
+  await useSession.getState().signOut();
+  queryClient.clear();
+}
 
-      logout: async () => {
-        // Demo token auth: call the backend to invalidate the token, then clear
-        // client state regardless of outcome (token is cleared client-side per
-        // the /auth/logout contract).
-        try {
-          await api.logout();
-        } catch {
-          // Swallow logout errors — local state is still cleared below.
-        }
-        set({ user: null, token: null, isAuthenticated: false, error: null });
-      },
+export function useMe() {
+  return useQuery({
+    queryKey: ['me'],
+    queryFn: async () => {
+      const me = await api.get<Me>('/me');
+      await useSession.getState().setUser(me);
+      return me;
+    },
+  });
+}
 
-      setUser: (user) => set({ user }),
+export function useStats() {
+  return useQuery({ queryKey: ['me', 'stats'], queryFn: () => api.get<ProfileStats>('/me/stats') });
+}
 
-      clearError: () => set({ error: null }),
-    }),
-    {
-      name: 'cravings-auth',
-      storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
-);
+export function useUpdateProfile() {
+  return useMutation({
+    mutationFn: (input: ProfileInput) => api.patch<Me>('/me', input),
+    onSuccess: async (me) => {
+      await useSession.getState().setUser(me);
+      queryClient.setQueryData(['me'], me);
+    },
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (input: { currentPassword: string; newPassword: string }) => api.post<void>('/me/password', input),
+  });
+}
+
+export type HistoryKind = 'plans' | 'polls' | 'pickup-offers' | 'pickup-requests';
+type HistoryItem = { plans: Plan; polls: Poll; 'pickup-offers': PickupOffer; 'pickup-requests': PickupRequest };
+
+export function useHistory<K extends HistoryKind>(kind: K) {
+  return useQuery({
+    queryKey: ['me', kind],
+    queryFn: () => api.get<Page<HistoryItem[K]>>(`/me/${kind}`, { size: 50 }),
+  });
+}
+
+export function useAcceptTerms() {
+  return useMutation({
+    mutationFn: () => api.post<Me>('/me/accept-terms'),
+    onSuccess: async (me) => {
+      await useSession.getState().setUser(me);
+      queryClient.setQueryData(['me'], me);
+    },
+  });
+}
+
+/** Permanently deletes the account on the server, then signs out locally. */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: (password: string) => api.delete<void>('/me', { password }),
+    onSuccess: async () => {
+      await useSession.getState().signOut();
+      queryClient.clear();
+    },
+  });
+}

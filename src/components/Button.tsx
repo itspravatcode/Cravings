@@ -1,81 +1,60 @@
-import { TouchableOpacity, TouchableOpacityProps } from 'react-native';
-import React from 'react';
-import { Text } from 'react-native';
-import { StyleSheet } from 'react-native';
-import { colors } from '@/theme/colors';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { colors, radius } from '@/lib/theme';
+import { Icon, type IconName } from './Icon';
 
-type ButtonProps = TouchableOpacityProps & {
+type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+
+type Props = {
   title: string;
-  variant?: 'primary' | 'secondary' | 'outline';
-  disabled?: boolean;
+  onPress?: () => void;
+  variant?: Variant;
+  size?: 'md' | 'sm';
+  icon?: IconName;
   loading?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
 };
 
-export const Button: React.FC<ButtonProps> = ({
-  title,
-  variant = 'primary',
-  disabled,
-  loading,
-  style,
-  ...props
-}) => {
-  const baseStyles = [
-    styles.container,
-    variant === 'primary' && styles.primary,
-    variant === 'secondary' && styles.secondary,
-    variant === 'outline' && styles.outline,
-    disabled && styles.disabled,
-    style,
-  ];
+const VARIANTS: Record<Variant, { bg: string; fg: string; border?: string }> = {
+  primary: { bg: colors.primary, fg: '#fff' },
+  secondary: { bg: colors.primarySoft, fg: colors.primaryDark },
+  outline: { bg: 'transparent', fg: colors.primaryDark, border: colors.primary },
+  ghost: { bg: 'transparent', fg: colors.textSecondary },
+  danger: { bg: colors.dangerSoft, fg: colors.danger },
+};
 
+export function Button({ title, onPress, variant = 'primary', size = 'md', icon, loading, disabled, style }: Props) {
+  const v = VARIANTS[variant];
+  const inactive = disabled || loading;
   return (
-    <TouchableOpacity
-      style={baseStyles}
-      disabled={disabled || loading}
-      activeOpacity={0.7}
-      {...props}
+    <Pressable
+      onPress={onPress}
+      disabled={inactive}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!inactive, busy: !!loading }}
+      style={({ pressed }) => [
+        styles.base,
+        size === 'sm' ? styles.sm : styles.md,
+        { backgroundColor: v.bg, borderColor: v.border ?? 'transparent', opacity: inactive ? 0.55 : pressed ? 0.85 : 1 },
+        style,
+      ]}
     >
       {loading ? (
-        <Text style={[styles.text, variant === 'outline' && styles.outlineText]}>
-          Loading...
-        </Text>
+        <ActivityIndicator color={v.fg} />
       ) : (
-        <Text style={[styles.text, variant === 'outline' && styles.outlineText]}>
-          {title}
-        </Text>
+        <View style={styles.row}>
+          {icon && <Icon name={icon} size={size === 'sm' ? 16 : 18} color={v.fg} />}
+          <Text style={[styles.text, { color: v.fg, fontSize: size === 'sm' ? 13 : 15 }]}>{title}</Text>
+        </View>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primary: {
-    backgroundColor: colors.primary,
-  },
-  secondary: {
-    backgroundColor: colors.secondary,
-  },
-  outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  disabled: {
-    backgroundColor: colors.textMuted,
-  },
-  text: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  outlineText: {
-    color: colors.primary,
-  },
+  base: { borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
+  md: { minHeight: 50, paddingHorizontal: 20 },
+  sm: { minHeight: 34, paddingHorizontal: 16 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  text: { fontWeight: '700' },
 });

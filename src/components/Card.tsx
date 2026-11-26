@@ -1,39 +1,19 @@
-import { View, StyleSheet, ViewProps } from 'react-native';
-import React from 'react';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { colors, radius, shadow, spacing } from '@/lib/theme';
 
-type CardProps = ViewProps & {
-  children: React.ReactNode;
-  padded?: boolean;
-};
-
-export const Card: React.FC<CardProps> = ({ children, padded = true, style, ...props }) => {
+export function Card({ children, onPress, style }: { children: ReactNode; onPress?: () => void; style?: StyleProp<ViewStyle> }) {
+  if (!onPress) return <View style={[styles.card, style]}>{children}</View>;
   return (
-    <View
-      style={[
-        styles.container,
-        padded && styles.padded,
-        style,
-      ]}
-      {...props}
-    >
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }, style]}>
       {children}
-    </View>
+    </Pressable>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ecf0f1',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-  },
-  padded: {
-    padding: 16,
+  card: {
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm,
+    borderWidth: 1, borderColor: colors.border, ...shadow,
   },
 });

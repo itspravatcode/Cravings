@@ -1,70 +1,108 @@
-import { create } from 'zustand';
-import { Group } from '@/types';
-import { api } from '@/services/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { GroupDetail, GroupPreview, GroupSummary, GroupType, Id, JoinMode, JoinResult, MemberView } from '@/lib/types';
+import { invalidateContent, queryClient } from './queryClient';
 
-interface GroupState {
-  groups: Group[];
-  currentGroup: Group | null;
-  isLoading: boolean;
-  error: string | null;
-  fetchGroups: () => Promise<void>;
-  createGroup: (data: Partial<Group>) => Promise<Group | null>;
-  joinGroup: (groupId: string, userId: string) => Promise<void>;
-  setCurrentGroup: (group: Group | null) => void;
-  setError: (error: string | null) => void;
+export type GroupInput = { name: string; type: GroupType; description?: string; joinMode?: JoinMode };
+
+const refreshGroups = () => Promise.all([queryClient.invalidateQueries({ queryKey: ['groups'] }), invalidateContent()]);
+
+export function useMyGroups() {
+  return useQuery({ queryKey: ['groups'], queryFn: () => api.get<GroupSummary[]>('/groups') });
 }
 
-export const useGroupStore = create<GroupState>((set) => ({
-  groups: [],
-  currentGroup: null,
-  isLoading: false,
-  error: null,
+/** Groups the user can post into (active memberships only). */
+export function useActiveGroups() {
+  const q = useMyGroups();
+  return { ...q, data: q.data?.filter((g) => g.myStatus === 'ACTIVE') };
+}
 
-  fetchGroups: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const groups = await api.getGroups();
-      set({ groups, isLoading: false, error: null });
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to load groups' });
-    }
-  },
+export function useGroup(id: Id) {
+  return useQuery({ queryKey: ['groups', id], queryFn: () => api.get<GroupDetail>(`/groups/${id}`) });
+}
 
-  createGroup: async (data) => {
-    set({ isLoading: true, error: null });
-    try {
-      const group = await api.createGroup(data);
-      set((state) => ({
-        groups: [...state.groups, group],
-        isLoading: false,
-        error: null,
-      }));
-      return group;
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to create group' });
-      return null;
-    }
-  },
+export function useMembers(id: Id) {
+  return useQuery({ queryKey: ['groups', id, 'members'], queryFn: () => api.get<MemberView[]>(`/groups/${id}/members`) });
+}
 
-  joinGroup: async (groupId, userId) => {
-    set({ isLoading: true, error: null });
-    try {
-      // Backend join group uses inviteCode query param; we look up the group first
-      const group = (await api.getGroups()).find((g) => g.id === groupId);
-      if (!group) throw new Error('Group not found');
-      await api.joinGroup(group.inviteCode);
-      set((state) => ({
-        groups: state.groups.map((g) =>
-          g.id === groupId ? { ...g, memberIds: [...g.memberIds, userId] } : g
-        ),
-        isLoading: false,
-        error: null,
-      }));
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to join group' });
-    }
-  },
+export function useJoinRequests(id: Id, enabled: boolean) {
+  return useQuery({
+    queryKey: ['groups', id, 'join-requests'],
+    queryFn: () => api.get<MemberView[]>(`/groups/${id}/join-requests`),
+    enabled,
+  });
+}
 
-  setCurrentGroup: (group) => set({ currentGroup: group }),
-  setError: (error) => set({ error }),
-}));
+export function useInvitePreview(code: string) {
+  return useQuery({
+    queryKey: ['invite', code],
+    queryFn: () => api.get<GroupPreview>(`/groups/invite/${encodeURIComponent(code)}`),
+    enabled: code.trim().length >= 6,
+  });
+}
+
+export function useCreateGroup() {
+  return useMutation({
+    mutationFn: (input: GroupInput) => api.post<GroupDetail>('/groups', input),
+    onSuccess: refreshGroups,
+  });
+}
+
+export function useUpdateGroup(id: Id) {
+  return useMutation({
+    mutationFn: (input: Partial<GroupInput>) => api.patch<GroupDetail>(`/groups/${id}`, input),
+    onSuccess: refreshGroups,
+  });
+}
+
+export function useJoinGroup() {
+  return useMutation({
+    mutationFn: (inviteCode: string) => api.post<JoinResult>('/groups/join', { inviteCode: inviteCode.trim() }),
+    onSuccess: refreshGroups,
+  });
+}
+
+export function useAcceptInvite() {
+  return useMutation({
+    mutationFn: (groupId: Id) => api.post<JoinResult>(`/groups/${groupId}/accept-invite`),
+    onSuccess: refreshGroups,
+  });
+}
+
+export function useInviteUser(groupId: Id) {
+  return useMutation({
+    mutationFn: (username: string) => api.post<void>(`/groups/${groupId}/invites`, { username: username.trim().replace(/^@/, '') }),
+  });
+}
+
+export function useRegenerateCode(groupId: Id) {
+  return useMutation({
+    mutationFn: () => api.post<{ inviteCode: string }>(`/groups/${groupId}/invite-code`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['groups', groupId] }),
+  });
+}
+
+export function useLeaveGroup() {
+  return useMutation({ mutationFn: (groupId: Id) => api.post<void>(`/groups/${groupId}/leave`), onSuccess: refreshGroups });
+}
+
+export function useDeleteGroup() {
+  return useMutation({ mutationFn: (groupId: Id) => api.delete<void>(`/groups/${groupId}`), onSuccess: refreshGroups });
+}
+
+export function useMemberAction(groupId: Id) {
+  return useMutation({
+    mutationFn: ({ action, userId }: { action: 'approve' | 'decline' | 'remove' | 'make-owner'; userId: Id }) => {
+      switch (action) {
+        case 'approve':
+        case 'decline':
+          return api.post<void>(`/groups/${groupId}/join-requests/${userId}/${action}`);
+        case 'remove':
+          return api.delete<void>(`/groups/${groupId}/members/${userId}`);
+        case 'make-owner':
+          return api.post<void>(`/groups/${groupId}/transfer-ownership`, { userId });
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['groups'] }),
+  });
+}

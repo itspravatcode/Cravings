@@ -1,65 +1,44 @@
-import { create } from 'zustand';
-import { Poll } from '@/types';
-import { api } from '@/services/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { Id, Poll } from '@/lib/types';
+import { invalidateContent, queryClient } from './queryClient';
 
-interface PollState {
-  polls: Poll[];
-  isLoading: boolean;
-  error: string | null;
-  fetchPolls: (groupId: string) => Promise<void>;
-  createPoll: (data: Partial<Poll>) => Promise<Poll | null>;
-  votePoll: (pollId: string, optionId: string, userId: string) => Promise<void>;
-  setError: (error: string | null) => void;
+export type PollInput = {
+  groupId: Id;
+  question: string;
+  options: string[];
+  closesAt: string;
+  allowVoteChange?: boolean;
+  publish?: boolean;
+};
+
+const store = (poll: Poll) => {
+  queryClient.setQueryData(['polls', poll.id], poll);
+  return invalidateContent();
+};
+
+export function usePoll(id: Id) {
+  return useQuery({ queryKey: ['polls', id], queryFn: () => api.get<Poll>(`/polls/${id}`) });
 }
 
-export const usePollStore = create<PollState>((set) => ({
-  polls: [],
-  isLoading: false,
-  error: null,
+export function useCreatePoll() {
+  return useMutation({ mutationFn: (input: PollInput) => api.post<Poll>('/polls', input), onSuccess: store });
+}
 
-  fetchPolls: async (groupId) => {
-    set({ isLoading: true, error: null });
-    try {
-      const polls = await api.getPolls(groupId);
-      set({ polls, isLoading: false, error: null });
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to load polls' });
-    }
-  },
+export function useVote() {
+  return useMutation({
+    mutationFn: ({ pollId, optionId }: { pollId: Id; optionId: Id }) => api.post<Poll>(`/polls/${pollId}/vote`, { optionId }),
+    onSuccess: store,
+  });
+}
 
-  createPoll: async (data) => {
-    set({ isLoading: true, error: null });
-    try {
-      const poll = await api.createPoll(data);
-      set((state) => ({
-        polls: [...state.polls, poll],
-        isLoading: false,
-        error: null,
-      }));
-      return poll;
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to create poll' });
-      return null;
-    }
-  },
+export function usePollAction() {
+  return useMutation({
+    mutationFn: ({ id, action }: { id: Id; action: 'publish' | 'close' }) => api.post<Poll>(`/polls/${id}/${action}`),
+    onSuccess: store,
+  });
+}
 
-  votePoll: async (pollId, optionId, userId) => {
-    set({ isLoading: true, error: null });
-    try {
-      await api.votePoll(pollId, optionId);
-      // Refresh polls for the group to reflect vote
-      const current = usePollStore.getState();
-      const poll = current.polls.find((p) => p.id === pollId);
-      if (poll) {
-        const updated = await api.getPolls(poll.groupId);
-        set({ polls: updated, isLoading: false, error: null });
-        return;
-      }
-      set({ isLoading: false, error: null });
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to vote' });
-    }
-  },
-
-  setError: (error) => set({ error }),
-}));
+export function useDeleteDraft() {
+  return useMutation({ mutationFn: (id: Id) => api.delete<void>(`/polls/${id}`), onSuccess: invalidateContent });
+}

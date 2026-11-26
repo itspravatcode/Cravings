@@ -1,66 +1,55 @@
-import { create } from 'zustand';
-import { PickupOffer, PickupRequest } from '@/types';
-import { api } from '@/services/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { Id, PickupCategory, PickupOffer, PickupRequest } from '@/lib/types';
+import { invalidateContent, queryClient } from './queryClient';
 
-interface PickupState {
-  offers: PickupOffer[];
-  requests: PickupRequest[];
-  isLoading: boolean;
-  error: string | null;
-  fetchPickups: (groupId: string) => Promise<void>;
-  createPickup: (data: Partial<PickupOffer>) => Promise<PickupOffer | null>;
-  addRequest: (request: PickupRequest) => void;
-  updateRequestStatus: (requestId: string, status: PickupRequest['status']) => void;
-  completeOffer: (offerId: string) => void;
-  setError: (error: string | null) => void;
+export type OfferInput = { groupId: Id; destination: string; note?: string; availableUntil: string; categories: PickupCategory[] };
+export type RequestInput = { itemName: string; category: PickupCategory; quantity: number; note?: string };
+
+export const CATEGORY_LABEL: Record<PickupCategory, string> = { SNACKS: 'Snacks', DRINKS: 'Drinks', ESSENTIALS: 'Essentials' };
+
+const refreshOffer = (offerId: Id) =>
+  Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['pickups', offerId] }),
+    invalidateContent(),
+  ]);
+
+export function useOffer(id: Id) {
+  return useQuery({ queryKey: ['pickups', id], queryFn: () => api.get<PickupOffer>(`/pickups/${id}`) });
 }
 
-export const usePickupStore = create<PickupState>((set) => ({
-  offers: [],
-  requests: [],
-  isLoading: false,
-  error: null,
+export function useOfferRequests(id: Id) {
+  return useQuery({ queryKey: ['pickups', id, 'requests'], queryFn: () => api.get<PickupRequest[]>(`/pickups/${id}/requests`) });
+}
 
-  fetchPickups: async (groupId) => {
-    set({ isLoading: true, error: null });
-    try {
-      const offers = await api.getPickups(groupId);
-      set({ offers, isLoading: false, error: null });
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to load pickups' });
-    }
-  },
+export function useCreateOffer() {
+  return useMutation({
+    mutationFn: (input: OfferInput) => api.post<PickupOffer>('/pickups', input),
+    onSuccess: (offer) => {
+      queryClient.setQueryData(['pickups', offer.id], offer);
+      return invalidateContent();
+    },
+  });
+}
 
-  createPickup: async (data) => {
-    set({ isLoading: true, error: null });
-    try {
-      const offer = await api.createPickup(data);
-      set((state) => ({
-        offers: [...state.offers, offer],
-        isLoading: false,
-        error: null,
-      }));
-      return offer;
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to create pickup' });
-      return null;
-    }
-  },
+export function useOfferAction() {
+  return useMutation({
+    mutationFn: ({ id, action }: { id: Id; action: 'close' | 'cancel' }) => api.post<PickupOffer>(`/pickups/${id}/${action}`),
+    onSuccess: (offer) => refreshOffer(offer.id),
+  });
+}
 
-  addRequest: (request) =>
-    set((state) => ({ requests: [...state.requests, request] })),
-  updateRequestStatus: (requestId, status) =>
-    set((state) => ({
-      requests: state.requests.map((r) =>
-        r.id === requestId ? { ...r, status } : r
-      ),
-    })),
-  completeOffer: (offerId) =>
-    set((state) => ({
-      offers: state.offers.map((o) =>
-        o.id === offerId ? { ...o, status: 'COMPLETED' } : o
-      ),
-    })),
+export function useCreateRequest(offerId: Id) {
+  return useMutation({
+    mutationFn: (input: RequestInput) => api.post<PickupRequest>(`/pickups/${offerId}/requests`, input),
+    onSuccess: () => refreshOffer(offerId),
+  });
+}
 
-  setError: (error) => set({ error }),
-}));
+export function useRequestAction() {
+  return useMutation({
+    mutationFn: ({ id, action }: { id: Id; action: 'accept' | 'decline' | 'complete' | 'cancel' }) =>
+      api.post<PickupRequest>(`/pickups/requests/${id}/${action}`),
+    onSuccess: (r) => refreshOffer(r.offerId),
+  });
+}

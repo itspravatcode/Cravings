@@ -1,82 +1,45 @@
-import { create } from 'zustand';
-import { SnackPlan } from '@/types';
-import { api } from '@/services/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { Id, Plan, UserSummary } from '@/lib/types';
+import { invalidateContent, queryClient } from './queryClient';
 
-interface PlanState {
-  plans: SnackPlan[];
-  isLoading: boolean;
-  error: string | null;
-  fetchPlans: (groupId?: string) => Promise<void>;
-  createPlan: (data: Partial<SnackPlan>) => Promise<SnackPlan | null>;
-  joinPlan: (planId: string, userId: string) => Promise<void>;
-  leavePlan: (planId: string, userId: string) => Promise<void>;
-  setError: (error: string | null) => void;
+export type PlanInput = {
+  groupId: Id;
+  title: string;
+  description?: string;
+  location: string;
+  startsAt: string;
+  participantLimit?: number;
+  imageUrl?: string;
+};
+
+export type PlanUpdate = Partial<Omit<PlanInput, 'groupId'>> & { clearParticipantLimit?: boolean };
+
+const store = (plan: Plan) => {
+  queryClient.setQueryData(['plans', plan.id], plan);
+  queryClient.invalidateQueries({ queryKey: ['plans', plan.id, 'participants'] });
+  return invalidateContent();
+};
+
+export function usePlan(id: Id) {
+  return useQuery({ queryKey: ['plans', id], queryFn: () => api.get<Plan>(`/plans/${id}`) });
 }
 
-export const usePlanStore = create<PlanState>((set) => ({
-  plans: [],
-  isLoading: false,
-  error: null,
+export function useParticipants(id: Id) {
+  return useQuery({ queryKey: ['plans', id, 'participants'], queryFn: () => api.get<UserSummary[]>(`/plans/${id}/participants`) });
+}
 
-  fetchPlans: async (groupId) => {
-    set({ isLoading: true, error: null });
-    try {
-      const plans = await api.getPlans(groupId);
-      set({ plans, isLoading: false, error: null });
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to load plans' });
-    }
-  },
+export function useCreatePlan() {
+  return useMutation({ mutationFn: (input: PlanInput) => api.post<Plan>('/plans', input), onSuccess: store });
+}
 
-  createPlan: async (data) => {
-    set({ isLoading: true, error: null });
-    try {
-      const plan = await api.createPlan(data);
-      set((state) => ({
-        plans: [...state.plans, plan],
-        isLoading: false,
-        error: null,
-      }));
-      return plan;
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to create plan' });
-      return null;
-    }
-  },
+export function useUpdatePlan(id: Id) {
+  return useMutation({ mutationFn: (input: PlanUpdate) => api.patch<Plan>(`/plans/${id}`, input), onSuccess: store });
+}
 
-  joinPlan: async (planId, userId) => {
-    set({ isLoading: true, error: null });
-    try {
-      await api.joinPlan(planId);
-      set((state) => ({
-        plans: state.plans.map((p) =>
-          p.id === planId ? { ...p, participantIds: [...p.participantIds, userId] } : p
-        ),
-        isLoading: false,
-        error: null,
-      }));
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to join plan' });
-    }
-  },
-
-  leavePlan: async (planId, userId) => {
-    set({ isLoading: true, error: null });
-    try {
-      await api.leavePlan(planId);
-      set((state) => ({
-        plans: state.plans.map((p) =>
-          p.id === planId
-            ? { ...p, participantIds: p.participantIds.filter((id) => id !== userId), status: 'OPEN' }
-            : p
-        ),
-        isLoading: false,
-        error: null,
-      }));
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed to leave plan' });
-    }
-  },
-
-  setError: (error) => set({ error }),
-}));
+export function usePlanAction() {
+  return useMutation({
+    mutationFn: ({ id, action }: { id: Id; action: 'join' | 'leave' | 'cancel' }) => api.post<Plan>(`/plans/${id}/${action}`),
+    onSuccess: store,
+  });
+}
